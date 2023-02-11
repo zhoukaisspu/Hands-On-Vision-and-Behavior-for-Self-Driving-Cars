@@ -48,7 +48,7 @@ def compute_perspective(width, height, pt1, pt2, pt3, pt4):
 
 def warp(img, filename):
     img_persp = img.copy()
-
+    save_dir(img_persp, "original_", filename)
     cv2.line(img_persp, perspective_dest[0], perspective_dest[1], (255, 255, 255), 3)
     cv2.line(img_persp, perspective_dest[1], perspective_dest[2], (255, 255, 255), 3)
     cv2.line(img_persp, perspective_dest[2], perspective_dest[3], (255, 255, 255), 3)
@@ -90,10 +90,10 @@ def threshold(channel_threshold, channel_edge, filename):
     save_dir(binary, "threshold_edge_only_", filename)
     save_dir(channel_threshold, "channel_only_", filename)
 
-    binary[(channel_threshold >= 140) & (channel_threshold <= 255)] = 255
+    binary[(channel_threshold >= 180) & (channel_threshold <= 255)] = 255
 
     binary_threshold = np.zeros_like(channel_threshold)
-    binary_threshold[(channel_threshold >= 140) & (channel_threshold <= 255)] = 255
+    binary_threshold[(channel_threshold >= 180) & (channel_threshold <= 255)] = 255
 
     return (save_dir(binary, "threshold_", filename), save_dir(binary_threshold, "threshold_other", filename))
 
@@ -358,44 +358,49 @@ def reset():
     right_fit_avg = None
 
 
-compute_perspective(1024, 600, [160, 425], [484, 310], [546, 310], [877, 425])
+compute_perspective(640, 480, [118, 303], [280, 88], [428, 88], [625, 303])
 for filename in os.listdir("test_images_sd"):
     reset()
     print(filename)
     img = cv2.imread("test_images_sd/" + filename)
     detect_lanes(img, filename, [], [])
 
-set_save_files(False)
-cap = cv2.VideoCapture("video-sd.mp4")
-writer = cv2.VideoWriter('video-sd-out.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 25, (1024, 600))
+# set_save_files(False)
+# cap = cv2.VideoCapture("car.avi")
+# writer = cv2.VideoWriter('video-sd-out.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 25, (1024, 600))
 
-n = 0
-left_lanes = []
-right_lanes = []
+# n = 0
+# left_lanes = []
+# right_lanes = []
 
-compute_perspective(1024, 600, [140, 415], [445, 315], [596, 315], [867, 415])
-reset()
+# compute_perspective(640, 480, [118, 303], [280, 88], [428, 88], [625, 303])
+# reset()
 
-while True:
-    ret, frame = cap.read()
-    if not (ret):
-        break
+# while True:
+#     ret, frame = cap.read()
+#     _frame = frame.copy()
+#     if not (ret):
+#         break
 
-    if n % 100 == 0:
-        set_save_files(True)
+#     if n % 100 == 0:
+#         set_save_files(True)
+#     left_lanes = []
+#     right_lanes = []
+#     frame = detect_lanes(frame, "frame_" + str(n) + ".jpg", left_lanes, right_lanes)
+#     myframes = cv2.hconcat([_frame, frame])
+#     cv2.imshow('window',myframes)
+#     cv2.waitKey(25)
+#     writer.write(frame)
 
-    frame = detect_lanes(frame, "frame_" + str(n) + ".jpg", left_lanes, right_lanes)
-    writer.write(frame)
+#     if (len(left_lanes) > MAX_DETECTIONS):
+#         left_lanes = left_lanes[1:]
+#         right_lanes = right_lanes[1:]
 
-    if (len(left_lanes) > MAX_DETECTIONS):
-        left_lanes = left_lanes[1:]
-        right_lanes = right_lanes[1:]
+#     if (n % 5 == 0):
+#         print("Saving frame", n)
+#     n = n + 1
 
-    if (n % 5 == 0):
-        print("Saving frame", n)
-    n = n + 1
+#     set_save_files(False)
 
-    set_save_files(False)
-
-writer.release()
-cap.release()
+# writer.release()
+# cap.release()
