@@ -18,8 +18,10 @@ left_fit_avg = None
 right_fit_avg = None
 MIN_DETECTIONS = 8
 MAX_DETECTIONS = 10
-
-
+current_left_fitx = None
+current_right_fitx = None
+g_left_line = None
+g_right_line = None
 # pt1, pt2, ptr3, and pt4 and four points defining a trapezoid used for the perspective correction
 def compute_perspective(width, height, pt1, pt2, pt3, pt4):
     global perspective_trapezoid, perspective_dest
@@ -93,7 +95,7 @@ def threshold(channel_threshold, channel_edge, filename):
     binary[(channel_threshold >= 180) & (channel_threshold <= 255)] = 255
 
     binary_threshold = np.zeros_like(channel_threshold)
-    binary_threshold[(channel_threshold >= 180) & (channel_threshold <= 255)] = 255
+    binary_threshold[(channel_threshold >= 220) & (channel_threshold <= 255)] = 255
 
     return (save_dir(binary, "threshold_", filename), save_dir(binary_threshold, "threshold_other", filename))
 
@@ -124,58 +126,96 @@ def avg_x(hist_lanes):
 
 # Single lane line
 class Line:
-    lane_indexes = None
-    # pixel positions
-    x = None
-    y = None
+    def __init__(self):
+        self.lane_indexes = None
+        # pixel positions
+        self.x = None
+        self.y = None
 
-    # Fit a second order polynomial to each
-    fit = None
-    # Plotting parameters
-    fitx = None
+        # Fit a second order polynomial to each
+        self.fit = None
+        # Plotting parameters
+        self.fitx = None
 
-    # Histogram
-    hist_x = None
+        self.derivate = None
+        # Histogram
+        self.hist_x = None
 
+        self.ondeg_fitx = None
+
+        self.is_left = False
+        self.is_right = False
+        self.has_line = True
 
 # Data collected during the sliding windows phase
 class SlideWindow:
-    left = Line()
-    right = Line()
-    hist = None
+    # left = Line()
+    # right = Line()
+    # hist = None
 
-    left_avg = None
-    right_avg = None
+    # left_avg = None
+    # right_avg = None
 
-    ploty = None
+    #ploty = None
 
     def __init__(self, hist, left_lane_indexes, right_lane_indexes, non_zero_x, non_zero_y):
+        self.left = Line()
+        self.right = Line()
+        self.hist = None
+        self.ploty = None
+        self.left_avg = None
+        self.right_avg = None
         self.left.lane_indexes = np.concatenate(left_lane_indexes)
         self.right.lane_indexes = np.concatenate(right_lane_indexes)
+        print("left.lane_indexes:",self.left.lane_indexes.shape)
+        print("right.lane_index:",self.right.lane_indexes.shape)
         self.left.hist_x = hist.x_left
         self.right.hist_x = hist.x_right
+        if self.left.lane_indexes.shape[0] < 100:
+            self.left.has_line = False
+        if self.right.lane_indexes.shape[0] < 100:
+            self.right.has_line = False
         # Extract left and right positions
-        self.left.x = non_zero_x[self.left.lane_indexes]
-        self.left.y = non_zero_y[self.left.lane_indexes]
-        self.right.x = non_zero_x[self.right.lane_indexes]
-        self.right.y = non_zero_y[self.right.lane_indexes]
+        if self.left.has_line is True:
+            self.left.x = non_zero_x[self.left.lane_indexes]
+            self.left.y = non_zero_y[self.left.lane_indexes]
+        if self.right.has_line is True:
+            self.right.x = non_zero_x[self.right.lane_indexes]
+            self.right.y = non_zero_y[self.right.lane_indexes]
 
     def plot_lines(self, img, color_left=(0, 255, 255), color_right=(0, 255, 255)):
         left = []
         right = []
+        left_one = []
+        right_one = []
+        myleft = []
         for i in range(0, len(self.ploty)):
-            left.append((self.left.fitx[i], self.ploty[i]))
-            right.append((self.right.fitx[i], self.ploty[i]))
-
+            if self.left.has_line is True:
+                left.append((self.left.fitx[i], self.ploty[i]))
+                left_one.append((self.left.ondeg_fitx[i],self.ploty[i]))
+                myleft.append((self.ploty[i],self.left.fitx[i]))
+            if self.right.has_line is True:
+                right.append((self.right.fitx[i], self.ploty[i]))
+                right_one.append((self.right.ondeg_fitx[i],self.ploty[i]))
+        #plotarray = np.array(myleft)
+        #plotx = plotarray[:,1]
+        #ploty = plotarray[:,0]
+        #print(plotx.shape)
+        #print(ploty.shape)
+        # plt.plot(plotx,ploty)
+        # plt.gca().invert_yaxis()
+        # plt.show()
+        #print(myleft)
         cv2.polylines(img, np.int32([left]), False, color_left)
         cv2.polylines(img, np.int32([right]), False, color_right)
-
+        cv2.polylines(img, np.int32([left_one]),False, (14,155,33))
+        cv2.polylines(img, np.int32([right_one]),False, (14,155,33))
         return img
 
 
 def slide_window(img, binary_warped, hist, num_windows, filename=None, prefix=None):
     img_height = binary_warped.shape[0]
-    window_height = np.int(img_height / num_windows)
+    window_height = int(img_height / num_windows)
     # Indices (e.g. coordinates) of the pixels that are not zero
     non_zero = binary_warped.nonzero()
     non_zero_y = np.array(non_zero[0])
@@ -217,16 +257,17 @@ def slide_window(img, binary_warped, hist, num_windows, filename=None, prefix=No
         right_lane_indexes.append(non_zero_right)
         # If you found > min_pixels pixels, recenter next window on the mean position
         if len(non_zero_left) > min_pixels:
-            left_x = np.int(np.mean(non_zero_x[non_zero_left]))
+            left_x = int(np.mean(non_zero_x[non_zero_left]))
 
         if len(non_zero_right) > min_pixels:
-            right_x = np.int(np.mean(non_zero_x[non_zero_right]))
-
+            right_x = int(np.mean(non_zero_x[non_zero_right]))
+    #print("left_lane_index:",len(left_lane_indexes))
+    #print(left_lane_indexes)
     valid, sw = fit_slide_window(binary_warped, hist, left_lane_indexes, right_lane_indexes, non_zero_x, non_zero_y)
 
     if valid and filename and prefix and get_save_files():
-        out_img[non_zero_y[sw.left.lane_indexes], non_zero_x[sw.left.lane_indexes]] = [0, 255, 192]
-        out_img[non_zero_y[sw.right.lane_indexes], non_zero_x[sw.right.lane_indexes]] = [0, 255, 192]
+        out_img[non_zero_y[sw.left.lane_indexes], non_zero_x[sw.left.lane_indexes]] = [0, 0, 255]
+        out_img[non_zero_y[sw.right.lane_indexes], non_zero_x[sw.right.lane_indexes]] = [0, 0, 255]
         img_plot = sw.plot_lines(out_img)
 
         cv2.imwrite(ensure_dir(filename) + "/" + prefix + filename, img_plot)
@@ -244,30 +285,104 @@ def fit_slide_window(binary_warped, hist, left_lane_indexes, right_lane_indexes,
     # y coordinates
     sw.ploty = np.array([float(x) for x in range(binary_warped.shape[0])])
 
-    if len(sw.left.y) == 0:
-        return False, sw
+    # if len(sw.left.y) == 0:
+    #     return False, sw
 
     # Fit a second order polynomial to approximate the points
-    left_fit = np.polynomial.polynomial.polyfit(sw.left.y, sw.left.x, 2)
-    right_fit = np.polynomial.polynomial.polyfit(sw.right.y, sw.right.x, 2)
+    if sw.left.has_line is True:
+        left_fit = np.polynomial.polynomial.polyfit(sw.left.y, sw.left.x, 2)
+        left_fit_one_deg = np.polynomial.polynomial.polyfit(sw.left.y, sw.left.x, 1)
+        left_fit_avg = None
+        left_fit_avg = moving_average(left_fit_avg, left_fit, 0.92)
+        #leftd = np.poly1d(np.flip(left_fit_avg))
+        #left_derivative = leftd.deriv()
+        sw.left.fitx = left_fit_avg[2] * sw.ploty ** 2 + left_fit_avg[1] * sw.ploty + left_fit_avg[0]
+        left_one_deg_d = np.poly1d(np.flip(left_fit_one_deg))
+        left_one_drivate = left_one_deg_d.deriv()
+        # left_one_value = left_one_drivate(sw.ploty)
+        sw.left.ondeg_fitx = left_one_deg_d(sw.ploty)
+        sw.left.derivate = left_one_drivate.c[0]
+        print("left drivate:", left_one_drivate.c[0])
+        if left_one_drivate.c[0] > 1.0:
+            sw.left.is_left = True
+            sw.left.is_right = False
+        if left_one_drivate.c[0] < -1.0:
+            sw.left.is_left = False
+            sw.left.is_right = True
+    if sw.right.has_line is True:
+        right_fit = np.polynomial.polynomial.polyfit(sw.right.y, sw.right.x, 2)
+        right_fit_one_deg = np.polynomial.polynomial.polyfit(sw.right.y, sw.right.x, 1)
+        right_fit_avg = None
+        right_fit_avg = moving_average(right_fit_avg, right_fit, 0.92)
+        # rightd = np.poly1d(np.flip(right_fit_avg))
+        # right_drivate = rightd.deriv()
+        sw.right.fitx = right_fit_avg[2] * sw.ploty ** 2 + right_fit_avg[1] * sw.ploty + right_fit_avg[0]
+        right_one_deg_d = np.poly1d(np.flip(right_fit_one_deg))
+        sw.right.ondeg_fitx = right_one_deg_d(sw.ploty)
+        right_one_drivate = right_one_deg_d.deriv()
+        sw.right.derivate = right_one_drivate.c[0]
+        print("right drivate:", right_one_drivate.c[0])
+        if right_one_drivate.c[0] > 1.0:
+            sw.right.is_left = True
+            sw.right.is_right = False
+        if right_one_drivate.c[0] < -1.0:
+            sw.right.is_left = False
+            sw.right.is_right = True 
+    #print('<<<<<<<<<<<<<<<<<<<')
+    #print(right_fit)
+    
+   
+    #global left_fit_avg, right_fit_avg
+    
+    
+    
+    
 
-    global left_fit_avg, right_fit_avg
+    #print(type(left_fit_avg))
+    #print(left_fit_avg)
+    #print(leftd)
 
-    left_fit_avg = moving_average(left_fit_avg, left_fit, 0.92)
-    right_fit_avg = moving_average(right_fit_avg, right_fit, 0.92)
-
+    #print(right_fit_avg)
+    #print(rightd)
+    #print(right_drivate)
+    #leftd_value = left_derivative(sw.ploty)
+    #right_value = right_drivate(sw.ploty)
+    #print(sw.ploty.shape)
+    #print(leftd_value.shape)
     # Generate list of x and y values, using the terms of the polynomial
     # x = Ay^2 + By + C;
-    sw.left.fitx = left_fit_avg[2] * sw.ploty ** 2 + left_fit_avg[1] * sw.ploty + left_fit_avg[0]
-    sw.right.fitx = right_fit_avg[2] * sw.ploty ** 2 + right_fit_avg[1] * sw.ploty + right_fit_avg[0]
+    # print("ploty shape:",sw.ploty.shape)
+    
+    
+    # print("sw.left.fitx.shape:",sw.left.fitx.shape)
+    # print("sw.right.fitx.shape:",sw.right.fitx.shape)
 
+
+
+    
+    # right_one_value = right_one_drivate(sw.ploty)
+
+  
+    # plt.plot(sw.ploty, left_one_value)
+    # plt.show()
+    #print("right drivate:",right_one_drivate.c[0])
+    # plt.plot(sw.ploty, right_one_value)
+    # plt.show()
     return True, sw
 
 
 def show_lanes(sw, img_warped, img_orig, filename):
+    global g_left_line, g_right_line
     img = img_warped.copy()
-
-    if sw.left:
+    if sw.left.has_line:
+        print("show_lanes, sw.left.fitx.shape", sw.left.fitx.shape)
+    else:
+        print("has no left line")
+    if sw.right.has_line:
+        print("show_lanes, sw.right.fitx.shape", sw.right.fitx.shape)
+    else:
+        print("has no right line")
+    if sw.left and sw.left.has_line is True and sw.left.is_left is False and sw.left.is_right is False:
         fitx_points_warped = np.float32([np.transpose(np.vstack([sw.left.fitx, sw.ploty]))])
         fitx_points = cv2.perspectiveTransform(fitx_points_warped, perspective_correction_inv)
         left_line_warped = np.int_(fitx_points_warped[0])
@@ -279,13 +394,26 @@ def show_lanes(sw, img_warped, img_orig, filename):
                      (0, 255, 0), 5)
             cv2.line(img, (left_line_warped[i][0], left_line_warped[i][1]),
                      (left_line_warped[i + 1][0], left_line_warped[i + 1][1]), (0, 255, 0), 5)
+        g_left_line = sw.left
+    if sw.left.has_line is False and g_right_line is not None and g_left_line is not None:
+        if sw.right and sw.right.has_line is True and sw.right.is_left is False and sw.right.is_right is False:
+            fitx_points_warped = np.float32([np.transpose(np.vstack([g_left_line.fitx, sw.ploty]))])
+            fitx_points = cv2.perspectiveTransform(fitx_points_warped, perspective_correction_inv)
+            left_line_warped = np.int_(fitx_points_warped[0])
+            left_line = np.int_(fitx_points[0])
+            n = len(left_line)
 
-    if sw.right:
+            for i in range(n - 1):
+                cv2.line(img_orig, (left_line[i][0], left_line[i][1]), (left_line[i + 1][0], left_line[i + 1][1]),
+                    (0, 255, 0), 5)
+                cv2.line(img, (left_line_warped[i][0], left_line_warped[i][1]),
+                     (left_line_warped[i + 1][0], left_line_warped[i + 1][1]), (0, 255, 0), 5)
+    if sw.right and sw.right.has_line is True and sw.right.is_left is False and sw.right.is_right is False:
         fitx_points_warped = np.float32([np.transpose(np.vstack([sw.right.fitx, sw.ploty]))])
         fitx_points = cv2.perspectiveTransform(fitx_points_warped, perspective_correction_inv)
         right_line_warped = np.int_(fitx_points_warped[0])
         right_line = np.int_(fitx_points[0])
-
+        g_right_line = sw.right
         for i in range(len(right_line) - 1):
             cv2.line(img_orig, (right_line[i][0], right_line[i][1]), (right_line[i + 1][0], right_line[i + 1][1]),
                      (0, 0, 255), 5)
@@ -293,7 +421,12 @@ def show_lanes(sw, img_warped, img_orig, filename):
                      (right_line_warped[i + 1][0], right_line_warped[i + 1][1]), (0, 0, 255), 5)
 
     save_dir(img, "lanes_warped_", filename)
-
+    know_image = cv2.warpPerspective(img, perspective_correction_inv, orig_size)
+    print("try to write image")
+    parital_img = know_image[199:303,]
+    parital_img_2 = img_orig[199:303,]
+    myimg = cv2.vconcat([parital_img,parital_img_2])
+    save_dir(myimg, "know_image_",filename)
     return save_dir(img_orig, "lanes_orig_", filename)
 
 
@@ -322,7 +455,7 @@ def partial_lane(histogram, lanes_previous_frames, tolerance):
 
 def detect_lanes(img_bgr, filename, left_lanes, right_lanes):
     img_warped = warp(img_bgr, filename)
-    img_hls = cv2.cvtColor(img_warped, cv2.COLOR_BGR2HLS).astype(np.float)
+    img_hls = cv2.cvtColor(img_warped, cv2.COLOR_BGR2HLS).astype(float)
     img_edge = edge_detection(img_warped[:, :, 1], filename)
     (img_binary_combined, img_binary_solo) = threshold(img_hls[:, :, 1], img_edge, filename)
     hist = histogram(img_binary_combined, "hist_", filename)
@@ -340,8 +473,11 @@ def detect_lanes(img_bgr, filename, left_lanes, right_lanes):
         right_lanes.append(deepcopy(sw.right))
     else:
         # In case of problems, use the previous detection
-        sw.left = left_lanes[len(left_lanes) - 1]
-        sw.right = right_lanes[len(right_lanes) - 1]
+        #print(">>>>>>>>>>>>>>>>>>")
+        if(len(left_lanes) != 0):
+            sw.left = left_lanes[len(left_lanes) - 1]
+        if(len(right_lanes) != 0):
+            sw.right = right_lanes[len(right_lanes) - 1]
 
         left_lanes.append(sw.left)
         right_lanes.append(sw.right)
@@ -358,49 +494,60 @@ def reset():
     right_fit_avg = None
 
 
-compute_perspective(640, 480, [118, 303], [280, 88], [428, 88], [625, 303])
-for filename in os.listdir("test_images_sd"):
-    reset()
-    print(filename)
-    img = cv2.imread("test_images_sd/" + filename)
-    detect_lanes(img, filename, [], [])
-
-# set_save_files(False)
-# cap = cv2.VideoCapture("car.avi")
-# writer = cv2.VideoWriter('video-sd-out.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 25, (1024, 600))
-
-# n = 0
-# left_lanes = []
-# right_lanes = []
-
-# compute_perspective(640, 480, [118, 303], [280, 88], [428, 88], [625, 303])
+# compute_perspective(640, 480, [118, 303], [188, 199], [544, 199], [625, 303])
 # reset()
+# for filename in os.listdir("test_images_sd"):
+#     print(filename)
+#     img = cv2.imread("test_images_sd/" + filename)
+#     detect_lanes(img, filename, [], [])
 
-# while True:
-#     ret, frame = cap.read()
-#     _frame = frame.copy()
-#     if not (ret):
-#         break
+set_save_files(False)
+cap = cv2.VideoCapture("car.avi")
+writer = cv2.VideoWriter('video-sd-out.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 25, (1280, 480))
 
-#     if n % 100 == 0:
-#         set_save_files(True)
-#     left_lanes = []
-#     right_lanes = []
-#     frame = detect_lanes(frame, "frame_" + str(n) + ".jpg", left_lanes, right_lanes)
-#     myframes = cv2.hconcat([_frame, frame])
-#     cv2.imshow('window',myframes)
-#     cv2.waitKey(25)
-#     writer.write(frame)
+n = 0
+left_lanes = []
+right_lanes = []
 
-#     if (len(left_lanes) > MAX_DETECTIONS):
-#         left_lanes = left_lanes[1:]
-#         right_lanes = right_lanes[1:]
+compute_perspective(640, 480, [118, 303], [188, 199], [544, 199], [625, 303])
+reset()
+set_save_files(False)
+while True:
+    ret, frame = cap.read()
+    _frame = frame.copy()
+    if not (ret):
+        break
 
-#     if (n % 5 == 0):
-#         print("Saving frame", n)
-#     n = n + 1
+    # if n % 100 == 0:
+    #     set_save_files(True)
+    left_lanes = []
+    right_lanes = []
+    org = (50, 50)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    fontScale = 1
+    color = (255, 0, 0)
+    thickness = 2
+    if n == 1126:
+        set_save_files(True)
+    else:
+        set_save_files(False)
+    print("frame_" + str(n))
+    frame = detect_lanes(frame, "frame_" + str(n) + ".jpg", [], [])
+    frame = cv2.putText(frame, str(n), org, font, fontScale, color, thickness, cv2.LINE_AA)
+    myframes = cv2.hconcat([_frame, frame])
+    cv2.imshow('window',myframes)
+    cv2.waitKey(100)
+    # writer.write(myframes)
 
-#     set_save_files(False)
+    if (len(left_lanes) > MAX_DETECTIONS):
+        left_lanes = left_lanes[1:]
+        right_lanes = right_lanes[1:]
 
-# writer.release()
-# cap.release()
+    # if (n % 5 == 0):
+    #     print("Saving frame", n)
+    n = n + 1
+
+    set_save_files(False)
+
+writer.release()
+cap.release()
